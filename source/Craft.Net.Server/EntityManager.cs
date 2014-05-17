@@ -1,6 +1,5 @@
 ﻿using Craft.Net.Anvil;
 using Craft.Net.Common;
-using Craft.Net.Entities;
 using Craft.Net.Networking;
 using Craft.Net.Physics;
 using System;
@@ -10,6 +9,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Craft.Net.Logic;
 
 namespace Craft.Net.Server
 {
@@ -34,7 +34,8 @@ namespace Craft.Net.Server
 
         public void SpawnEntity(World world, Entity entity)
         {
-            entity.EntityId = NextEntityId++;
+            if (entity.EntityId == -1)
+                entity.EntityId = NextEntityId++;
             entity.World = world;
             if (entity is IDiskEntity) // Assign chunk
             {
@@ -84,7 +85,10 @@ namespace Craft.Net.Server
         public void SendClientEntities(RemoteClient client)
         {
             foreach (var entity in GetEntitiesInRange(client.Entity, MaxClientDistance))
-                client.TrackEntity(entity);
+            {
+                if (entity != client.Entity)
+                    client.TrackEntity(entity);
+            }
         }
 
         public void Update()
@@ -101,6 +105,10 @@ namespace Craft.Net.Server
                     int id;
                     while (!MarkedForDespawn.TryDequeue(out id));
                     var entity = GetEntityById(id);
+                    if (entity == null)
+                        return; // What?
+                    foreach (var client in GetKnownClients(entity))
+                        client.ForgetEntity(entity);
                     Entities.Remove(entity);
                     if (entity is IPhysicsEntity)
                     {
@@ -108,14 +116,13 @@ namespace Craft.Net.Server
                         var engine = Server.GetPhysicsForWorld(entity.World);
                         engine.RemoveEntity((IPhysicsEntity)entity);
                     }
-                    foreach (var client in GetKnownClients(entity))
-                        client.ForgetEntity(entity);
-                    entity.PropertyChanged -= EntityPropertyChanged;
+                    if (entity != null)
+                        entity.PropertyChanged -= EntityPropertyChanged;
                 }
             }
         }
 
-        private Entity GetEntityById(int id)
+        public Entity GetEntityById(int id)
         {
             return Entities.FirstOrDefault(e => e.EntityId == id);
         }
@@ -130,7 +137,10 @@ namespace Craft.Net.Server
             var clients = Server.Clients.Where(c => c.IsLoggedIn && !c.KnownEntities.Contains(entity.EntityId)
                         && IsInRange(c.Entity.Position, entity.Position, MaxClientDistance)).ToArray();
             foreach (var client in clients)
-                client.TrackEntity(entity);
+            {
+                if (client.Entity.EntityId != entity.EntityId)
+                    client.TrackEntity(entity);
+            }
         }
 
         private void EntityPropertyChanged(object sender, PropertyChangedEventArgs e)
@@ -162,6 +172,19 @@ namespace Craft.Net.Server
                         client.ForgetEntity(entity);
                     foreach (var client in newClients)
                         client.TrackEntity(entity);
+                    if (entity is PlayerEntity)
+                    {
+                        // Update which entities this *player* can see
+                        var player = entity as PlayerEntity;
+                        var client = GetClient(player);
+                        // TODO: Switch to per-client view distance, not a global constant
+                        var toForget = client.KnownEntities.Where(id => !IsInRange(GetEntityById(id).Position, player.Position, MaxClientDistance)).ToArray();
+                        var toTrack = GetEntitiesInRange(player, MaxClientDistance);
+                        foreach (var forget in toForget)
+                            client.ForgetEntity(GetEntityById(forget));
+                        foreach (var track in toTrack)
+                            client.TrackEntity(track);
+                    }
                 }
             }
             if (e.PropertyName == "Position" || e.PropertyName == "Yaw" || e.PropertyName == "Pitch" || e.PropertyName == "HeadYaw")

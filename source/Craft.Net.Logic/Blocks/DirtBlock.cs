@@ -1,18 +1,17 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using Craft.Net.Common;
 using Craft.Net.Anvil;
 
 namespace Craft.Net.Logic.Blocks
 {
-    [Item(DirtBlock.BlockId, DirtBlock.DisplayName, "Initialize", typeof(Block))]
-    [Block(DirtBlock.BlockId, DisplayName = DirtBlock.DisplayName, Hardness = DirtBlock.Hardness)]
-    public static class DirtBlock
+    public class DirtBlock : Block
     {
-        public const string DisplayName = "Dirt";
-        public const short BlockId = 3;
-		public const double Hardness = 0.5;
+        public static readonly short Id = 3;
+        public override short BlockId { get { return Id; } }
+
+        public DirtBlock() : base("minecraft:dirt", hardness: 0.5)
+        {
+            base.SetPlacementSoundEffect(SoundEffect.DigGrass);
+        }
     }
 }

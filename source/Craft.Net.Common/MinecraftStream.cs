@@ -11,10 +11,103 @@ namespace Craft.Net.Common
     {
         static MinecraftStream()
         {
-            StringEncoding = Encoding.BigEndianUnicode;
+            StringEncoding = Encoding.UTF8;
         }
 
         public static Encoding StringEncoding;
+
+        /// <summary>
+        /// Reads a variable-length integer from the stream.
+        /// </summary>
+        public int ReadVarInt()
+        {
+            uint result = 0;
+            int length = 0;
+            while (true)
+            {
+                byte current = ReadUInt8();
+                result |= (current & 0x7Fu) << length++ * 7;
+                if (length > 5)
+                    throw new InvalidDataException("VarInt may not be longer than 28 bits.");
+                if ((current & 0x80) != 128)
+                    break;
+            }
+            return (int)result;
+        }
+
+        /// <summary>
+        /// Reads a variable-length integer from the stream.
+        /// </summary>
+        /// <param name="length">The actual length, in bytes, of the integer.</param>
+        public int ReadVarInt(out int length)
+        {
+            uint result = 0;
+            length = 0;
+            while (true)
+            {
+                byte current = ReadUInt8();
+                result |= (current & 0x7Fu) << length++ * 7;
+                if (length > 5)
+                    throw new InvalidDataException("VarInt may not be longer than 60 bits.");
+                if ((current & 0x80) != 128)
+                    break;
+            }
+            return (int)result;
+        }
+
+        /// <summary>
+        /// Writes a variable-length integer to the stream.
+        /// </summary>
+        public void WriteVarInt(int _value)
+        {
+            uint value = (uint)_value;
+            while (true)
+            {
+                if ((value & 0xFFFFFF80u) == 0)
+                {
+                    WriteUInt8((byte)value);
+                    break;
+                }
+                WriteUInt8((byte)(value & 0x7F | 0x80));
+                value >>= 7;
+            }
+        }
+
+        /// <summary>
+        /// Writes a variable-length integer to the stream.
+        /// </summary>
+        /// <param name="length">The actual length, in bytes, of the written integer.</param>
+        public void WriteVarInt(int _value, out int length)
+        {
+            uint value = (uint)_value;
+            Console.WriteLine(value.ToString("X"));
+            length = 0;
+            while (true)
+            {
+                length++;
+                if ((value & 0xFFFFFF80u) == 0)
+                {
+                    WriteUInt8((byte)value);
+                    break;
+                }
+                WriteUInt8((byte)(value & 0x7F | 0x80));
+                value >>= 7;
+            }
+        }
+
+        public static int GetVarIntLength(int _value)
+        {
+            uint value = (uint)_value;
+            int length = 0;
+            while (true)
+            {
+                length++;
+                if ((value & 0xFFFFFF80u) == 0)
+                    break;
+                value >>= 7;
+            }
+            return length;
+        }
 
         public byte ReadUInt8()
         {
@@ -276,15 +369,15 @@ namespace Craft.Net.Common
 
         public string ReadString()
         {
-            ushort length = ReadUInt16();
+            long length = ReadVarInt();
             if (length == 0) return string.Empty;
-            var data = ReadUInt8Array(length * 2);
+            var data = ReadUInt8Array((int)length);
             return StringEncoding.GetString(data);
         }
 
         public void WriteString(string value)
         {
-            WriteUInt16((ushort)value.Length);
+            WriteVarInt(StringEncoding.GetByteCount(value));
             if (value.Length > 0)
                 WriteUInt8Array(StringEncoding.GetBytes(value));
         }

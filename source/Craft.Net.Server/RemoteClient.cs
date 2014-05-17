@@ -1,6 +1,6 @@
 ﻿using Craft.Net.Anvil;
 using Craft.Net.Common;
-using Craft.Net.Entities;
+using Craft.Net.Logic;
 using Craft.Net.Networking;
 using System;
 using System.Collections.Concurrent;
@@ -24,23 +24,25 @@ namespace Craft.Net.Server
             KnownEntities = new List<int>();
             LoadedChunks = new List<Coordinates2D>();
             Settings = new ClientSettings();
-			MaxDigDistance = 6;
+            MaxDigDistance = 6;
             Tags = new Dictionary<string, object>();
         }
 
+        public NetworkManager NetworkManager { get; set; }
         public TcpClient NetworkClient { get; set; }
-        public MinecraftStream NetworkStream { get; set; }
+        public Stream NetworkStream { get; set; }
         public bool IsLoggedIn { get; internal set; }
         public ConcurrentQueue<IPacket> PacketQueue { get; set; }
         public ClientSettings Settings { get; set; }
         public bool EncryptionEnabled { get; protected internal set; }
-        public string Hostname { get; set; }
-        public short Ping { get; set; }
-        public string Username { get; set; }
+        public string Hostname { get; internal set; }
+        public short Ping { get; internal set; }
+        public string Username { get; internal set; }
         public PlayerEntity Entity { get; set; }
         public int Reach { get { return GameMode == GameMode.Creative ? 6 : 5; } } // TODO: Allow customization
-		public int MaxDigDistance { get; set; }
+        public int MaxDigDistance { get; set; }
         public Dictionary<string, object> Tags { get; set; }
+        public string UUID { get; internal set; }
 
         protected internal List<Coordinates2D> LoadedChunks { get; set; }
         protected internal DateTime LastKeepAlive { get; set; }
@@ -49,8 +51,10 @@ namespace Craft.Net.Server
         protected internal Coordinates3D ExpectedBlockToMine { get; set; }
         protected internal int BlockBreakStageTime { get; set; }
         protected internal DateTime? BlockBreakStartTime { get; set; }
-		protected internal byte[] VerificationToken { get; set; }
+        protected internal byte[] VerificationToken { get; set; }
+        protected internal List<short> PaintedSlots { get; set; }
 
+        internal bool PauseChunkUpdates = false;
         internal PlayerManager PlayerManager { get; set; }
 
         public World World
@@ -73,7 +77,7 @@ namespace Craft.Net.Server
         }
 
         internal List<int> KnownEntities { get; set; }
-        internal string AuthenticationHash { get; set; }
+        internal string ServerId { get; set; }
 
         protected internal byte[] SharedKey { get; set; }
 
@@ -84,7 +88,10 @@ namespace Craft.Net.Server
 
         public void Disconnect(string reason)
         {
-            SendPacket(new DisconnectPacket(reason));
+            if (NetworkManager.NetworkMode == NetworkMode.Login)
+                SendPacket(new LoginDisconnectPacket(reason));
+            else
+                SendPacket(new DisconnectPacket(reason));
         }
 
         internal void TrackEntity(Entity entity)
@@ -97,7 +104,7 @@ namespace Craft.Net.Server
                     var player = entity as PlayerEntity;
                     var selectedItem = player.SelectedItem.Id;
                     if (selectedItem == -1) selectedItem = 0;
-                    SendPacket(new SpawnPlayerPacket(player.EntityId, player.Username, MathHelper.CreateAbsoluteInt(player.Position.X),
+                    SendPacket(new SpawnPlayerPacket(player.EntityId, UUID, player.Username, MathHelper.CreateAbsoluteInt(player.Position.X),
                         MathHelper.CreateAbsoluteInt(player.Position.Y), MathHelper.CreateAbsoluteInt(player.Position.Z),
                         MathHelper.CreateRotationByte(player.Yaw), MathHelper.CreateRotationByte(player.Pitch), selectedItem, player.Metadata));
                     if (!player.SelectedItem.Empty)
@@ -161,6 +168,8 @@ namespace Craft.Net.Server
         /// </summary>
         public virtual void UpdateChunks(bool forceUpdate)
         {
+            if (!forceUpdate && PauseChunkUpdates)
+                return;
             if (forceUpdate ||
                 (int)(Entity.Position.X) >> 4 != (int)(Entity.OldPosition.X) >> 4 ||
                 (int)(Entity.Position.Z) >> 4 != (int)(Entity.OldPosition.Z) >> 4)
@@ -192,18 +201,29 @@ namespace Craft.Net.Server
             }
         }
 
+        public virtual void UnloadAllChunks()
+        {
+            lock (LoadedChunks)
+            {
+                while (LoadedChunks.Any())
+                {
+                    UnloadChunk(LoadedChunks[0]);
+                }
+            }
+        }
+
         /// <summary>
         /// Loads the given chunk on the client.
         /// </summary>
-        public virtual void LoadChunk (Coordinates2D position)
-		{
-			var chunk = Entity.World.GetChunk(position);
-			SendPacket(ChunkHelper.CreatePacket(chunk));
-			// TODO: Tile entities
-			foreach (var entity in chunk.TileEntities)
-			{
-				// ...
-			}
+        public virtual void LoadChunk(Coordinates2D position)
+        {
+            var chunk = Entity.World.GetChunk(position);
+            SendPacket(ChunkHelper.CreatePacket(chunk));
+            // TODO: Tile entities
+            foreach (var entity in chunk.TileEntities)
+            {
+                // ...
+            }
             LoadedChunks.Add(position);
         }
 
@@ -226,9 +246,10 @@ namespace Craft.Net.Server
         /// <summary>
         /// Sends a <see cref="ChatMessagePacket"/> to the client.
         /// </summary>
-        public virtual void SendChat(string text)
+        public virtual void SendChat(ChatMessage message)
         {
-            SendPacket(new ChatMessagePacket(string.Format("{{\"text\":\"{0}\"}}", text)));
+            //SendPacket(new ChatMessagePacket(string.Format("{{\"text\":\"{0}\"}}", text)));
+            SendPacket(new ChatMessagePacket(message.ToJson()));
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

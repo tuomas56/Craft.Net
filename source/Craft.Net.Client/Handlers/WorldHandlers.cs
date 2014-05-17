@@ -3,6 +3,7 @@ using Craft.Net.Client.Events;
 using Ionic.Zlib;
 using Craft.Net.Anvil;
 using Craft.Net.Networking;
+using Craft.Net.Common;
 
 namespace Craft.Net.Client.Handlers
 {
@@ -37,30 +38,24 @@ namespace Craft.Net.Client.Handlers
             {
                 if ((primaryBitMap & (1 << y)) > 0)
                 {
-                    // Add this section
-
                     // Blocks
                     Array.Copy(data, y * BlockDataLength, chunk.Sections[y].Blocks, 0, BlockDataLength);
-
                     // Metadata
                     Array.Copy(data, (BlockDataLength * sectionCount) + (y * NibbleDataLength),
-                               chunk.Sections[y].Metadata.Data, 0, NibbleDataLength);
-
+                        chunk.Sections[y].Metadata.Data, 0, NibbleDataLength);
                     // Light
                     Array.Copy(data, ((BlockDataLength + NibbleDataLength) * sectionCount) + (y * NibbleDataLength),
-                               chunk.Sections[y].BlockLight.Data, 0, NibbleDataLength);
-
+                        chunk.Sections[y].BlockLight.Data, 0, NibbleDataLength);
                     // Sky light
                     if (lightIncluded)
+                    {
                         Array.Copy(data, ((BlockDataLength + NibbleDataLength + NibbleDataLength) * sectionCount) + (y * NibbleDataLength),
-                                   chunk.Sections[y].SkyLight.Data, 0, NibbleDataLength);
+                            chunk.Sections[y].SkyLight.Data, 0, NibbleDataLength);
+                    }
                 }
             }
-
-            // biomes
             if (groundUp)
                 Array.Copy(data, data.Length - chunk.Biomes.Length, chunk.Biomes, 0, chunk.Biomes.Length);
-
             client.World.SetChunk(coordinates, chunk);
             //client.OnChunkRecieved(new ChunkRecievedEventArgs(position, new ReadOnlyChunk(chunk)));
         }
@@ -83,6 +78,14 @@ namespace Craft.Net.Client.Handlers
 
                 offset += chunkLength;
             }
+        }
+
+        public static void BlockChange(MinecraftClient client, IPacket _packet)
+        {
+          var packet = (BlockChangePacket)_packet;
+          var position = new Coordinates3D(packet.X, packet.Y, packet.Z);
+          client.World.SetBlockId(position, (short)packet.BlockType);
+          client.World.SetMetadata(position, packet.BlockMetadata);
         }
 
         public static void ChunkData(MinecraftClient client, IPacket _packet)

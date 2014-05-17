@@ -1,18 +1,38 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Craft.Net.Anvil;
+using Craft.Net.Common;
 
 namespace Craft.Net.Logic.Blocks
 {
-    [Item(FlowerBlock.BlockId, FlowerBlock.DisplayName, "Initialize", typeof(Block))]
-    [Block(FlowerBlock.BlockId, DisplayName = FlowerBlock.DisplayName, Hardness = FlowerBlock.Hardness)]
-    public static class FlowerBlock
+    public class YellowFlowerBlock : Block
     {
-        public const string DisplayName = "Flower";
-        public const short BlockId = 37;
-		public const double Hardness = 0;
+        public static readonly short Id = 37;
+        public override short BlockId { get { return Id; } }
+
+        public YellowFlowerBlock() : base("minecraft:yellow_flower")
+        {
+            base.SetBoundingBoxHandler(BoundingBox);
+        }
+        
+        private BoundingBox? BoundingBox(BlockInfo info)
+        {
+            return null;   
+        }
+    }
+
+    public class FlowerBlock : Block
+    {
+        public static readonly short Id = 38;
+        public override short BlockId { get { return Id; } }
+
+        public FlowerBlock() : base("minecraft:red_flower")
+        {
+            base.SetBoundingBoxHandler(BoundingBox);
+        }
+        
+        private BoundingBox? BoundingBox(BlockInfo info)
+        {
+            return null;   
+        }
     }
 }
+

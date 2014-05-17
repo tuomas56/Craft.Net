@@ -32,6 +32,12 @@ namespace Craft.Net.Common
             this.Max = max;
         }
 
+        public BoundingBox(BoundingBox b)
+        {
+            this.Min = new Vector3(b.Min);
+            this.Max = new Vector3(b.Max);
+        }
+
         #endregion Public Constructors
 
 
@@ -60,6 +66,13 @@ namespace Craft.Net.Common
             return ContainmentType.Intersects;
         }
 
+        public bool Contains(Vector3 vec)
+        {
+            return Min.X <= vec.X && vec.X <= Max.X &&
+                Min.Y <= vec.Y && vec.Y <= Max.Y &&
+                Min.Z <= vec.Z && vec.Z <= Max.Z;
+        }
+
         public static BoundingBox CreateFromPoints(IEnumerable<Vector3> points)
         {
             if (points == null)
@@ -78,6 +91,20 @@ namespace Craft.Net.Common
                 throw new ArgumentException();
 
             return new BoundingBox(vector2, vector1);
+        }
+
+        /// <summary>
+        /// Offsets this BoundingBox. Does not modify this object, but returns a new one
+        /// </summary>
+        /// <returns>
+        /// The offset bounding box.
+        /// </returns>
+        /// <param name='Offset'>
+        /// The offset.
+        /// </param>
+        public BoundingBox OffsetBy(Vector3 Offset)
+        {
+            return new BoundingBox(Min + Offset, Max + Offset);
         }
 
         public Vector3[] GetCorners()

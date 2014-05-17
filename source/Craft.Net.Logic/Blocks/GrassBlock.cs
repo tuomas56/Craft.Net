@@ -1,25 +1,18 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Craft.Net.Anvil;
 using Craft.Net.Common;
 
 namespace Craft.Net.Logic.Blocks
 {
-    [Item(GrassBlock.BlockId, GrassBlock.DisplayName, "Initialize", typeof(Block))]
-    [Block(GrassBlock.BlockId, GrassBlock.DisplayName, "Initialize", Hardness = GrassBlock.Hardness)]
-    public static class GrassBlock
+    public class GrassBlock : Block
     {
-        public const string DisplayName = "Grass Block";
-        public const short BlockId = 2;
-		public const double Hardness = 0.6;
+        public static readonly short Id = 2;
+        public override short BlockId { get { return Id; } }
 
-		public static BlockLogicDescriptor Initialize(BlockLogicDescriptor descriptor)
-		{
-			descriptor.GetDrop = (b, w, c) => new[] { new ItemStack(DirtBlock.BlockId) };
-			return descriptor;
-		}
+        public GrassBlock() : base("minecraft:grass", hardness: 0.6)
+        {
+            base.SetPlacementSoundEffect(SoundEffect.DigGrass);
+            base.SetDropHandler((world, coordinates, info) => new[] { new ItemStack(DirtBlock.Id) });
+        }
     }
 }

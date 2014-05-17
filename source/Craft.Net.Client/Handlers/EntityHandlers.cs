@@ -13,21 +13,22 @@ namespace Craft.Net.Client.Handlers
         public static void PlayerPositionAndLook(MinecraftClient client, IPacket _packet)
         {
             var packet = (PlayerPositionAndLookPacket)_packet;
-            client._position = new Vector3(packet.X, packet.Stance, packet.Z);
+            if (Math.Abs(packet.X) < 0.01 && Math.Abs(packet.X) > 0)
+                return; // Sometimes the vanilla server sends weird position updates like this
+            client.Position = new Vector3(packet.X, packet.Y, packet.Z);
             if (!client.IsSpawned)
             {
                 client.IsSpawned = true;
                 client.OnInitialSpawn(new EntitySpawnEventArgs(client.Position, client.EntityId));
             }
-
-            client.SendPacket(new PlayerPositionPacket(packet.X, packet.Stance, packet.Z, packet.Y, true));
+            client.SendPacket(new PlayerPositionPacket(client.Position.X, client.Position.Y, client.Position.Z, client.Position.Y - 1.62, true));
         }
 
         public static void EntityTeleport(MinecraftClient client, IPacket _packet)
         {
             var packet = (EntityTeleportPacket)_packet;
             if (packet.EntityId == client.EntityId)
-                client._position = new Vector3(packet.X, packet.Y, packet.Z);
+                client.Position = new Vector3(packet.X, packet.Y, packet.Z);
         }
     }
 }

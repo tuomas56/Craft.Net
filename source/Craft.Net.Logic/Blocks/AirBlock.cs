@@ -1,22 +1,21 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System;
+using Craft.Net.Common;
 
 namespace Craft.Net.Logic.Blocks
 {
-    [Item(AirBlock.BlockId, AirBlock.DisplayName, "Initialize", typeof(Block))]
-    [Block(AirBlock.BlockId, DisplayName = AirBlock.DisplayName, Hardness = AirBlock.Hardness, Initializer = "Initialize")]
-    public static class AirBlock
+    public class AirBlock : Block
     {
-        public const short BlockId = 0;
-        public const double Hardness = 0;
-        public const string DisplayName = "Air";
+        public static readonly short Id = 0;
+        public override short BlockId { get { return Id; } }
 
-        public static BlockLogicDescriptor Initialize(BlockLogicDescriptor descriptor)
+        public AirBlock() : base("minecraft:air")
         {
-            descriptor.BoundingBox = null;
-            return descriptor;
+            base.SetBoundingBoxHandler(BoundingBox);
+        }
+        
+        private BoundingBox? BoundingBox(BlockInfo info)
+        {
+            return null;   
         }
     }
 }

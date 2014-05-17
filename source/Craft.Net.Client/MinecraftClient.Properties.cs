@@ -1,19 +1,50 @@
 using System;
+using System.Threading;
+using Craft.Net.Anvil;
 using Craft.Net.Common;
 using Craft.Net.Networking;
+using Craft.Net.Logic;
+using Craft.Net.Physics;
 
 namespace Craft.Net.Client
 {
     public partial class MinecraftClient
     {
-        internal Vector3 _position;
+        // Private so that silly people won't try to modify it behind our backs - everything should go through the
+        // Position and OnGround properties
+
+        // Lock on all position data
+        private object _positionLock = new object();
+        private bool _onGround;
+        private Vector3 _position;
+        // We keep track of when the position has been set so that the NetworkWorker can update it properly.
+        private bool _positionChanged;
+
+        public bool OnGround
+        {
+            get { return _onGround; }
+            private set { _onGround = value; }
+        }
+
         public Vector3 Position
         {
-            get { return _position; }
+            get
+            {
+                Vector3 ret;
+                // Make sure that position data is in a consistent state.
+                lock (_positionLock)
+                {
+                    ret = _position;
+                }
+                return ret;
+            }
             set
             {
-                _position = value;
-                SendPacket(new PlayerPositionPacket(Position.X, Position.Y, Position.Z, Position.Y + 1.62, false));
+                lock (_positionLock)
+                {
+                    _positionChanged = _position != value;
+                    _position = value;
+                }
             }
         }
 

@@ -9,19 +9,29 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using System.IO;
+using Craft.Net.Networking;
 
 namespace TestServer
 {
     class Program
     {
+        static Level level;
+        static MinecraftServer server;
+
         static void Main(string[] args)
         {
-            var level = new Level(new StandardGenerator(), "world");
+            if (Directory.Exists("world"))
+                Directory.Delete("world", true);
+            level = new Level(new StandardGenerator(), "world");
             level.AddWorld("region");
+            level.AddWorld("test", new FlatlandGenerator());
+            level.Worlds[1].GenerateChunk(Coordinates2D.Zero);
             level.SaveTo("world");
-            var server = new MinecraftServer(level);
+            server = new MinecraftServer(level);
             server.ChatMessage += server_ChatMessage;
-            server.Settings.OnlineMode = false;
+            server.Settings.OnlineMode = true;
+            server.Settings.MotD = "Craft.Net Test Server";
             server.Start(new IPEndPoint(IPAddress.Any, 25565));
             Console.WriteLine("Press 'q' to exit");
             ConsoleKeyInfo cki;
@@ -32,13 +42,18 @@ namespace TestServer
 
         static void server_ChatMessage(object sender, ChatMessageEventArgs e)
         {
-            if (e.RawMessage.StartsWith("/"))
+            if (e.Message.RawMessage.StartsWith("/"))
             {
+                string command = e.Message.FullText();
                 e.Handled = true;
-                if (e.RawMessage == "/creative")
+                if (command == "/creative")
                     e.Origin.GameMode = GameMode.Creative;
-                else if (e.RawMessage == "/survival")
+                else if (command == "/survival")
                     e.Origin.GameMode = GameMode.Survival;
+                else if (e.RawMessage == "/world2")
+                    server.MoveClientToWorld(e.Origin, server.GetWorld("test"));
+                else if (e.RawMessage == "/world1")
+                    server.MoveClientToWorld(e.Origin, server.GetWorld("region"));
             }
         }
     }

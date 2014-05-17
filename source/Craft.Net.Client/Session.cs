@@ -10,11 +10,6 @@ namespace Craft.Net.Client
     {
         public static Session DoLogin(string username, string password)
         {
-            ServicePointManager.ServerCertificateValidationCallback += (s, ce, ch, errors) => 
-            {
-                // TODO: This is a really nasty hack. Why doesn't Mono recognize this cert anyway?
-                return ce.GetCertHashString() == "126B6351DC3039B2A244115F3766C038F4DBBC2A";
-            };
             var serializer = new JsonSerializer();
             try
             {
@@ -140,7 +135,7 @@ namespace Craft.Net.Client
             var serializer = new JsonSerializer();
             try
             {
-                var request = (HttpWebRequest)WebRequest.Create("https://authserver.mojang.com/authenticate");
+                var request = (HttpWebRequest)WebRequest.Create("https://authserver.mojang.com/refresh");
                 request.ContentType = "application/json";
                 request.Method = "POST";
                 var blob = new RefreshBlob(this);

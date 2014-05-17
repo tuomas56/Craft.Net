@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.IO;
 using System.Threading;
+using Craft.Net.Common;
 
 namespace Craft.Net.Anvil
 {
@@ -93,7 +94,7 @@ namespace Craft.Net.Anvil
         {
             lock (Regions)
             {
-                Regions[coordinates].Save();
+                Regions[coordinates].Save(Path.Combine(BaseDirectory, Region.GetRegionFileName(coordinates)));
                 Regions.Remove(coordinates);
             }
         }
@@ -172,7 +173,7 @@ namespace Craft.Net.Anvil
             lock (Regions)
             {
                 foreach (var region in Regions)
-                    region.Value.Save();
+                    region.Value.Save(Path.Combine(BaseDirectory, Region.GetRegionFileName(region.Key)));
             }
         }
 

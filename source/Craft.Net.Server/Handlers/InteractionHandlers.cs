@@ -5,10 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Craft.Net.Logic;
-using Craft.Net.Logic.Blocks;
 using Craft.Net.Anvil;
-using Craft.Net.Logic.Items;
-using Craft.Net.Entities;
 
 namespace Craft.Net.Server.Handlers
 {
@@ -16,25 +13,25 @@ namespace Craft.Net.Server.Handlers
     {
         public static void PlayerDigging(RemoteClient client, MinecraftServer server, IPacket _packet)
         {
-            var packet = (PlayerDiggingPacket)_packet;
+            var packet = (PlayerBlockActionPacket)_packet;
             var position = new Coordinates3D(packet.X, packet.Y, packet.Z);
             // TODO: Enforce line-of-sight
-            var block = client.World.GetBlock(position);
+            var block = client.World.GetBlockInfo(position);
             short damage;
             switch (packet.Action)
             {
-                case PlayerDiggingPacket.PlayerAction.StartedDigging:
+                case PlayerBlockActionPacket.BlockAction.StartDigging:
                     if (client.Entity.Position.DistanceTo(position) <= client.MaxDigDistance)
                     {
-                        if (client.GameMode == GameMode.Creative || client.Entity.Abilities.InstantMine || Block.GetLogicDescriptor(block).Hardness == 0)
-						{
-                            //Block.OnBlockMined(block, client.World, position, null); // TODO: See if we really need to call this
-							client.World.SetBlockId(position, 0);
-							client.World.SetMetadata(position, 0);
-						}
+                        // TODO: Block stuff
+                        if (client.GameMode == GameMode.Creative || client.Entity.Abilities.InstantMine)// || Block.GetBlockHardness(block.BlockId) == 0)
+                        {
+                            client.World.SetBlockId(position, 0);
+                            client.World.SetMetadata(position, 0);
+                        }
                         else
                         {
-                            int time = Block.GetHarvestTime(new ItemDescriptor(client.Entity.SelectedItem.Id), block, out damage);
+                            int time = Block.GetHarvestTime(block.BlockId, client.Entity.SelectedItem.Id, client.World, client.Entity, out damage);
                             client.ExpectedMiningEnd = DateTime.Now.AddMilliseconds(time - (client.Ping + 100));
                             client.ExpectedBlockToMine = position;
                             var knownClients = server.EntityManager.GetKnownClients(client.Entity);
@@ -45,7 +42,7 @@ namespace Craft.Net.Server.Handlers
                         }
                     }
                     break;
-                case PlayerDiggingPacket.PlayerAction.CancelDigging:
+                case PlayerBlockActionPacket.BlockAction.CancelDigging:
                     {
                         client.BlockBreakStartTime = null;
                         var knownClients = server.EntityManager.GetKnownClients(client.Entity);
@@ -53,7 +50,7 @@ namespace Craft.Net.Server.Handlers
                             c.SendPacket(new BlockBreakAnimationPacket(client.Entity.EntityId, position.X, position.Y, position.Z, 0xFF)); // reset
                     }
                     break;
-                case PlayerDiggingPacket.PlayerAction.FinishedDigging:
+                case PlayerBlockActionPacket.BlockAction.FinishDigging:
                     if (client.Entity.Position.DistanceTo(position) <= client.MaxDigDistance)
                     {
                         client.BlockBreakStartTime = null;
@@ -62,35 +59,38 @@ namespace Craft.Net.Server.Handlers
                             c.SendPacket(new BlockBreakAnimationPacket(client.Entity.EntityId, position.X, position.Y, position.Z, 0xFF)); // reset
                         if (client.ExpectedMiningEnd > DateTime.Now || client.ExpectedBlockToMine != position)
                             return;
-                        Block.GetHarvestTime(new ItemDescriptor(client.Entity.SelectedItem.Id), block, out damage);
+                        Block.GetHarvestTime(block.BlockId, client.Entity.SelectedItem.Id, client.World, client.Entity, out damage);
                         if (damage != 0)
                         {
                             var slot = client.Entity.Inventory[client.Entity.SelectedSlot];
                             if (!slot.Empty)
                             {
-                                //if (slot.AsItem() is ToolItem)
-                                //{
-                                //    var tool = slot.AsItem() as ToolItem;
-                                //    bool destroy = tool.Damage(damage);
-                                //    slot.Metadata = tool.Data;
-                                //    if (destroy)
-                                //        client.Entity.SetSlot(client.Entity.SelectedSlot, ItemStack.EmptyStack);
-                                //    else
-                                //        client.Entity.SetSlot(client.Entity.SelectedSlot, slot);
-                                //}
+                                if (slot.AsItem() != null)
+                                {
+                                    var item = slot.AsItem().Value;
+                                    if (Item.GetToolType(item.ItemId) != null)
+                                    {
+                                        bool destroyed = Item.Damage(ref item, damage);
+                                        slot.Metadata = item.Metadata;
+                                        if (destroyed)
+                                            client.Entity.Inventory[client.Entity.SelectedSlot] = ItemStack.EmptyStack;
+                                        else
+                                            client.Entity.Inventory[client.Entity.SelectedSlot] = slot;
+                                    }
+                                }
                             }
                         }
-                        Block.OnBlockMined(block, client.World, position, null);
+                        client.World.MineBlock(position);
                         client.Entity.FoodExhaustion += 0.025f;
                     }
                     break;
-                case PlayerDiggingPacket.PlayerAction.DropItem:
-                case PlayerDiggingPacket.PlayerAction.DropStack:
+                case PlayerBlockActionPacket.BlockAction.DropItem:
+                case PlayerBlockActionPacket.BlockAction.DropItemStack:
                     var SlotItem = client.Entity.Inventory[client.Entity.SelectedSlot];
                     if (!SlotItem.Empty)
                     {
                         var ItemCopy = (ItemStack)SlotItem.Clone();
-                        if (packet.Action == PlayerDiggingPacket.PlayerAction.DropStack)
+                        if (packet.Action == PlayerBlockActionPacket.BlockAction.DropItemStack)
                             client.Entity.Inventory[client.Entity.SelectedSlot] = ItemStack.EmptyStack;
                         else
                         {
@@ -116,55 +116,48 @@ namespace Craft.Net.Server.Handlers
             var slot = client.Entity.Inventory[client.Entity.SelectedSlot];
             var position = new Coordinates3D(packet.X, packet.Y, packet.Z);
             var cursorPosition = new Coordinates3D(packet.CursorX, packet.CursorY, packet.CursorZ);
-            BlockDescriptor? block = null;
+            BlockInfo? block = null;
             if (position != -Coordinates3D.One)
             {
-                if (position.DistanceTo(client.Entity.Position) > client.Reach)
+                if (position.DistanceTo((Coordinates3D)client.Entity.Position) > client.Reach)
                     return;
-                block = client.World.GetBlock(position);
+                block = client.World.GetBlockInfo(position);
             }
             bool use = true;
             if (block != null)
-                use = Block.OnBlockRightClicked(block.Value, client.World, position, AdjustByDirection(packet.Direction), cursorPosition);
+                use = client.World.RightClickBlock(position, packet.Face, cursorPosition, slot.AsItem());
             if (!slot.Empty)
             {
-                var item = new ItemDescriptor(slot.Id, slot.Metadata);
+                var item = slot.AsItem();
                 if (use)
                 {
                     if (block != null)
-					{
-                        Item.OnItemUsedOnBlock(item, client.World, position, AdjustByDirection(packet.Direction), cursorPosition);
-						if (client.GameMode != GameMode.Creative)
-						{
-							slot.Count--; // TODO: This is probably a bad place to put this code
-							if (slot.Count == 0)
-        	                    client.Entity.Inventory[client.Entity.SelectedSlot] = ItemStack.EmptyStack;
-    	                    else
-	                            client.Entity.Inventory[client.Entity.SelectedSlot] = slot;
-						}
-					}
+                    {
+                        client.World.UseItemOnBlock(position, packet.Face, cursorPosition, item.Value);
+                        if (item.Value.ItemId < 0x100)
+                        {
+                            client.SendPacket(new SoundEffectPacket(Block.GetPlacementSoundEffect(item.Value.ItemId),
+                                position.X, position.Y, position.Z, SoundEffectPacket.DefaultVolume, SoundEffectPacket.DefaultPitch));
+                        }
+                        if (client.GameMode != GameMode.Creative)
+                        {
+                            slot.Count--; // TODO: This is probably a bad place to put this code
+                            if (slot.Count == 0)
+                                client.Entity.Inventory[client.Entity.SelectedSlot] = ItemStack.EmptyStack;
+                            else
+                                client.Entity.Inventory[client.Entity.SelectedSlot] = slot;
+                        }
+                    }
                     else
-                        Item.OnItemUsed(item);
+                    {
+                        client.World.UseItemOnBlock(position, packet.Face, cursorPosition, item.Value);
+                        if (item.Value.ItemId < 0x100)
+                        {
+                            client.SendPacket(new SoundEffectPacket(Block.GetPlacementSoundEffect(item.Value.ItemId),
+                                position.X, position.Y, position.Z, SoundEffectPacket.DefaultVolume, SoundEffectPacket.DefaultPitch));
+                        }
+                    }
                 }
-            }
-        }
-
-        private static Vector3 AdjustByDirection(byte direction)
-        {
-            switch (direction)
-            {
-                case 0:
-                    return Vector3.Down;
-                case 1:
-                    return Vector3.Up;
-                case 2:
-                    return Vector3.Backwards;
-                case 3:
-                    return Vector3.Forwards;
-                case 4:
-                    return Vector3.Left;
-                default:
-                    return Vector3.Right;
             }
         }
     }

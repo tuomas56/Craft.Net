@@ -1,11 +1,16 @@
 using System;
 using Craft.Net.Networking;
+using Craft.Net.Physics;
+using Craft.Net.Logic;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using Craft.Net.Common;
 using System.Threading;
 using Craft.Net.Client.Events;
+using System.Collections.Generic;
+using System.Linq;
+using System.IO;
 
 namespace Craft.Net.Client
 {
@@ -17,7 +22,7 @@ namespace Craft.Net.Client
         {
             Session = session;
             PacketQueue = new ConcurrentQueue<IPacket>();
-            PacketHandlers = new PacketHandler[256];
+            PacketHandlers = new Dictionary<Type, PacketHandler>();
             Handlers.PacketHandlers.Register(this);
         }
 
@@ -29,19 +34,22 @@ namespace Craft.Net.Client
         public ReadOnlyWorld World { get; protected internal set; }
         public int EntityId { get; protected internal set; }
 
-        protected internal MinecraftStream Stream { get; set; }
         protected internal NetworkStream NetworkStream { get; set; }
+        protected internal NetworkManager NetworkManager { get; set; }
 
         internal byte[] SharedSecret { get; set; }
         internal bool IsLoggedIn { get; set; }
         internal bool IsSpawned { get; set; }
 
         private Thread NetworkWorkerThread { get; set; }
-        private PacketHandler[] PacketHandlers { get; set; }
+        private Dictionary<Type, PacketHandler> PacketHandlers { get; set; }
+        private ManualResetEvent NetworkingReset { get; set; }
 
-        public void RegisterPacketHandler(byte packetId, PacketHandler handler)
+        public void RegisterPacketHandler(Type packetType, PacketHandler handler)
         {
-            PacketHandlers[packetId] = handler;
+            if (!packetType.GetInterfaces().Any(p => p == typeof(IPacket)))
+                throw new InvalidOperationException("Packet type must implement Craft.Net.Networking.IPacket");
+            PacketHandlers[packetType] = handler;
         }
 
         public void Connect(IPEndPoint endPoint)
@@ -52,12 +60,18 @@ namespace Craft.Net.Client
             Client = new TcpClient();
             Client.Connect(EndPoint);
             NetworkStream = Client.GetStream();
-            Stream = new MinecraftStream(new BufferedStream(NetworkStream));
+            NetworkManager = new NetworkManager(NetworkStream);
+            NetworkingReset = new ManualResetEvent(true);
             NetworkWorkerThread = new Thread(NetworkWorker);
+            PhysicsWorkerThread = new Thread(PhysicsWorker);
+
             NetworkWorkerThread.Start();
-            var handshake = new HandshakePacket(PacketReader.ProtocolVersion, Session.SelectedProfile.Name,
-                EndPoint.Address.ToString(), EndPoint.Port);
+            var handshake = new HandshakePacket(NetworkManager.ProtocolVersion, 
+                EndPoint.Address.ToString(), (ushort)EndPoint.Port, NetworkMode.Login);
             SendPacket(handshake);
+            var login = new LoginStartPacket(Session.SelectedProfile.Name);
+            SendPacket(login);
+            PhysicsWorkerThread.Start();
         }
 
         public void Disconnect(string reason)
@@ -67,8 +81,7 @@ namespace Craft.Net.Client
             {
                 try
                 {
-                    new DisconnectPacket(reason).WritePacket(Stream);
-                    Stream.Flush();
+                    NetworkManager.WritePacket(new DisconnectPacket(reason), PacketDirection.Serverbound);
                     Client.Close();
                 }
                 catch { }
@@ -79,9 +92,7 @@ namespace Craft.Net.Client
         {
             if (Health > 0)
                 throw new InvalidOperationException("Player is not dead!");
-            //SendPacket(new RespawnPacket(Dimension.Overworld, // TODO: Other dimensions
-            //    Level.Difficulty, Level.GameMode, World.Height, Level.World.LevelType));
-            SendPacket(new ClientStatusPacket(ClientStatusPacket.ClientStatus.Respawn));
+            SendPacket(new ClientStatusPacket(ClientStatusPacket.StatusChange.Respawn));
         }
 
         public void SendPacket(IPacket packet)
@@ -94,6 +105,44 @@ namespace Craft.Net.Client
             SendPacket(new ChatMessagePacket(message));
         }
 
+        private DateTime nextPhysicsUpdate = DateTime.MinValue;
+        private Thread PhysicsWorkerThread;
+        private PhysicsEngine engine;
+        private void PhysicsWorker()
+        {
+            while (NetworkWorkerThread.IsAlive)
+            {
+                if (nextPhysicsUpdate < DateTime.Now)
+                {
+                    //We need to wait for a login packet to initialize the physics subsystem
+                    if (World != null && engine == null)
+                    {
+                        // 50 ms / update for 20 ticks per second
+                        engine = new PhysicsEngine(World.World, Block.PhysicsProvider, 50);
+                        engine.AddEntity(this);
+                    }
+                    nextPhysicsUpdate = DateTime.Now.AddMilliseconds(50);
+                    try
+                    {
+                        engine.Update();
+                    }
+                    catch (Exception)
+                    {
+                        // Sometimes the world hasn't loaded yet, so the Phyics update can't properly read blocks and
+                        // throws an exception.
+                    }
+                }
+                else
+                {
+                    var sleepTime = (nextPhysicsUpdate - DateTime.Now).Milliseconds;
+                    if (sleepTime > 0)
+                    {
+                        Thread.Sleep(sleepTime);
+                    }
+                }
+            }
+        }
+
         private DateTime nextPlayerUpdate = DateTime.MinValue;
         private void NetworkWorker()
         {
@@ -101,8 +150,23 @@ namespace Craft.Net.Client
             {
                 if (IsSpawned && nextPlayerUpdate < DateTime.Now)
                 {
-                    nextPlayerUpdate = DateTime.Now.AddMilliseconds(500);
-                    SendPacket(new PlayerPacket(true)); // TODO: Store OnGround properly
+                    nextPlayerUpdate = DateTime.Now.AddMilliseconds(100);
+                    lock (_positionLock)
+                    {
+                        SendPacket(new PlayerPacket(OnGround));
+
+                        if (_positionChanged)
+                        {
+                            SendPacket(new PlayerPositionPacket(
+                                Position.X,
+                                Position.Y,
+                                Position.Z,
+                                Position.Y - 1.62,
+                                OnGround
+                            ));
+                            _positionChanged = false;
+                        }
+                    }
                 }
                 // Send queued packets
                 while (PacketQueue.Count != 0)
@@ -113,8 +177,7 @@ namespace Craft.Net.Client
                         try
                         {
                             // Write packet
-                            packet.WritePacket(Stream);
-                            Stream.Flush();
+                            NetworkManager.WritePacket(packet, PacketDirection.Serverbound);
                             if (packet is DisconnectPacket)
                                 return;
                         }
@@ -127,21 +190,37 @@ namespace Craft.Net.Client
                 {
                     try
                     {
-                        var packet = PacketReader.ReadPacket(Stream);
+                        var packet = NetworkManager.ReadPacket(PacketDirection.Clientbound);
                         HandlePacket(packet);
                         if (packet is DisconnectPacket)
+                        {
+                            Console.WriteLine(((DisconnectPacket)packet).Reason);
                             return;
+                        }
                     }
-                    catch { /* TODO */ }
+                    catch (Exception e) 
+                    {
+                         // TODO: OnNetworkException or something
+                        Console.WriteLine(e);
+                    }
                 }
+                NetworkingReset.Set();
+                NetworkingReset.Reset();
                 Thread.Sleep(1);
             }
         }
 
+        protected internal void FlushPackets()
+        {
+            // Writes all pending packets to the underlying network stream
+            NetworkingReset.WaitOne();
+        }
+
         private void HandlePacket(IPacket packet)
         {
-            if (PacketHandlers[packet.Id] != null)
-                PacketHandlers[packet.Id](this, packet);
+            var type = packet.GetType();
+            if (PacketHandlers.ContainsKey(type))
+                PacketHandlers[type](this, packet);
             //throw new InvalidOperationException("Recieved a packet we can't handle: " + packet.GetType().Name);
         }
 

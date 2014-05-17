@@ -51,18 +51,20 @@ namespace Craft.Net.Client.Handlers
             var encryptedVerification = crypto.Encrypt(packet.VerificationToken, false);
             var response = new EncryptionKeyResponsePacket(encryptedSharedSecret, encryptedVerification);
             client.SendPacket(response);
+            client.FlushPackets();
+            client.NetworkManager.BaseStream = new AesStream(client.NetworkStream, client.SharedSecret);
         }
 
-        public static void EncryptionKeyResponse(MinecraftClient client, IPacket _packet)
+        public static void LoginSuccess(MinecraftClient client, IPacket _packet)
         {
-            // Enable encryption
-            client.Stream = new MinecraftStream(new AesStream(new BufferedStream(client.NetworkStream), client.SharedSecret));
-            client.SendPacket(new ClientStatusPacket(ClientStatusPacket.ClientStatus.InitialSpawn));
+            // var packet = (LoginSuccessPacket)_packet;
+            // TODO: We might want to do something here, dunno
         }
 
-        public static void LoginRequest(MinecraftClient client, IPacket _packet)
+        public static void JoinGame(MinecraftClient client, IPacket _packet)
         {
-            var packet = (LoginRequestPacket)_packet;
+            var packet = (JoinGamePacket)_packet;
+            // TODO: We might want to store the other packet fields somewhere
             client.EntityId = packet.EntityId;
             client.IsLoggedIn = true;
             client.World = new ReadOnlyWorld();

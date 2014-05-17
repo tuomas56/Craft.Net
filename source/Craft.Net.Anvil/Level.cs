@@ -22,7 +22,7 @@ namespace Craft.Net.Anvil
         [NbtIgnore]
         private string DatFile { get; set; }
         [NbtIgnore]
-        private string BaseDirectory { get; set; }
+        public string BaseDirectory { get; private set; }
         [NbtIgnore]
         public List<World> Worlds { get; set; }
         [NbtIgnore]
@@ -191,6 +191,7 @@ namespace Craft.Net.Anvil
         public Level(IWorldGenerator generator) : this()
         {
             GeneratorName = generator.GeneratorName;
+            generator.Seed = RandomSeed;
             generator.Initialize(this);
             WorldGenerator = generator;
             Spawn = WorldGenerator.SpawnPoint;
@@ -225,12 +226,15 @@ namespace Craft.Net.Anvil
         /// <summary>
         /// Creates and adds a world to this level, with the given name.
         /// </summary>
-        public void AddWorld(string name)
+        public void AddWorld(string name, IWorldGenerator worldGenerator = null)
         {
             if (Worlds.Any(w => w.Name.ToUpper() == name.ToUpper()))
                 throw new InvalidOperationException("A world with the same name already exists in this level.");
             var world = new World(name);
-            world.WorldGenerator = WorldGenerator;
+            if (worldGenerator == null)
+                world.WorldGenerator = WorldGenerator;
+            else
+                world.WorldGenerator = worldGenerator;
             Worlds.Add(world);
         }
 
@@ -319,7 +323,7 @@ namespace Craft.Net.Anvil
             level.WorldGenerator = GetGenerator(level.GeneratorName);
             level.WorldGenerator.Initialize(level);
             var worlds = Directory.GetDirectories(level.BaseDirectory).Where(
-                d => !Directory.GetFiles(d).Any(f => !f.EndsWith(".mca") && !f.EndsWith(".mcr")));
+                d => Directory.GetFiles(d).Any(f => f.EndsWith(".mca") || f.EndsWith(".mcr")));
             foreach (var world in worlds)
             {
                 var w = World.LoadWorld(world);
@@ -353,7 +357,7 @@ namespace Craft.Net.Anvil
         // Internally, we use network slots everywhere, but on disk, we need to use data slots
         // Maybe someday we can use the Window classes to remap these around or something
         // Or better yet, Mojang can stop making terrible design decisions
-        internal static int DataSlotToNetworkSlot(int index)
+        public static int DataSlotToNetworkSlot(int index)
         {
             if (index <= 8)
                 index += 36;
@@ -370,7 +374,7 @@ namespace Craft.Net.Anvil
             return index;
         }
 
-        internal static int NetworkSlotToDataSlot(int index)
+        public static int NetworkSlotToDataSlot(int index)
         {
             if (index >= 36 && index <= 44)
                 index -= 36;
